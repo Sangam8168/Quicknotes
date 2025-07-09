@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quicknotes - AI-Powered Summarizer</title>
+    <style>
+        .bubble-container {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+        .bubble {
+            position: absolute;
+            bottom: -100px;
+            left: calc(10% + 80vw * var(--rand-x, 0.5));
+            width: 40px;
+            height: 40px;
+            background: rgba(126, 214, 223, 0.14);
+            border-radius: 50%;
+            animation: floatBubble 12s linear infinite;
+            animation-delay: calc(-12s * var(--rand-delay, 0));
+        }
+        .bubble:nth-child(2) { width: 24px; height: 24px; left: 30vw; animation-duration: 10s; }
+        .bubble:nth-child(3) { width: 60px; height: 60px; left: 70vw; animation-duration: 16s; background: rgba(241, 196, 15, 0.13);}
+        .bubble:nth-child(4) { width: 32px; height: 32px; left: 80vw; animation-duration: 13s; background: rgba(155, 89, 182, 0.12);}
+        .bubble:nth-child(5) { width: 50px; height: 50px; left: 20vw; animation-duration: 15s; background: rgba(46, 204, 113, 0.13);}
+        @keyframes floatBubble {
+            0% { transform: translateY(0) scale(1); opacity: 0.7; }
+            60% { opacity: 0.5; }
+            100% { transform: translateY(-110vh) scale(1.2); opacity: 0; }
+        }
+        body.night-mode {
+            background: linear-gradient(135deg, #181c24 0%, #23243a 55%, #181c24 100%);
+            color: #f1f1f1;
+        }
+        body.night-mode .results {
+            background: linear-gradient(120deg, #22243a 0%, #23243a 100%);
+            box-shadow: 0 6px 32px 0 rgba(20,20,30,0.18);
+        }
+        body.night-mode .content-box {
+            background: linear-gradient(120deg, #23243a 0%, #2a2d3e 100%);
+            color: #eaeaea;
+            border: 1px solid #2a2d3e;
+            box-shadow: 0 4px 18px 0 rgba(0,0,0,0.45), 0 1.5px 6px 0 rgba(0,0,0,0.29);
+            font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+            font-size: 1.18rem;
+            line-height: 1.7;
+            letter-spacing: 0.02em;
+            padding: 26px 32px;
+            margin-bottom: 18px;
+            position: relative;
+            animation: fadeInBox 0.8s cubic-bezier(.4,0,.2,1);
+        }
+        @keyframes fadeInBox {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .highlight-sentence {
+            background: linear-gradient(90deg, #f1c40f22 0, #7ed6df22 100%);
+            border-radius: 6px;
+            padding: 2px 6px;
+            margin: 0 1px;
+            font-weight: 600;
+            color: #23243a; /* Dark text for visibility in light mode */
+            display: inline-block;
+        }
+        .summary-points {
+            margin: 0 0 0 1em;
+            padding: 0;
+        }
+        .summary-points li {
+            margin-bottom: 0.8em;
+            background: linear-gradient(90deg, #7ed6df33 0, #f1c40f22 100%);
+            border-radius: 5px;
+            padding: 7px 14px 7px 10px;
+            color: #23243a;
+            font-weight: 500;
+            list-style: none;
+            position: relative;
+            box-shadow: 0 2px 6px rgba(44,62,80,0.08);
+        }
+        body.night-mode .summary-points li {
+            color: #fffde4 !important;
+        }
+        .summary-points li:before {
+            content: '⭐';
+            margin-right: 10px;
+            font-size: 1.1em;
+            vertical-align: middle;
+        }
+        .qa-list {
+            margin: 0 0 0 1em;
+            padding: 0;
+        }
+        .qa-list li {
+            margin-bottom: 0.7em;
+            background: linear-gradient(90deg, #9b59b622 0, #7ed6df22 100%);
+            border-radius: 5px;
+            padding: 7px 14px 7px 10px;
+            color: #23243a;
+            font-weight: 500;
+            list-style: none;
+            position: relative;
+        }
+        body.night-mode .qa-list li {
+            color: #fffde4 !important;
+        }
+        .qa-list li:before {
+            content: '❓';
+            margin-right: 10px;
+            font-size: 1.1em;
+            vertical-align: middle;
+        }
+        body.night-mode .download-link {
+            background: rgba(255,255,255,0.08);
+            color: #1abc9c;
+        }
+        body.night-mode .download-link:hover {
+            background: rgba(255,255,255,0.18);
+        }
+        body.night-mode .results h2 {
+            color: #7ed6df;
+            text-shadow: 0 2px 8px #181c24;
+        }
+        .night-toggle {
+            position: absolute;
+            top: 28px;
+            right: 38px;
+            background: linear-gradient(135deg, #181c24 0%, #23243a 55%, #181c24 100%);
+            color: #f1c40f;
+            border: none;
+            border-radius: 18px;
+            padding: 8px 22px;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+            z-index: 10;
+            transition: background 0.2s, color 0.2s;
+            overflow: hidden;
+        }
+        .night-toggle:not(.active) {
+            background: linear-gradient(135deg, #181c24 0%, #23243a 55%, #7b2ff2 100%) !important;
+            color: #fff !important;
+        }
+        .night-toggle.active {
+            background: linear-gradient(90deg, #2c3e50 0%, #3498db 100%);
+            color: #fff;
+        }
+        .night-toggle.active:hover {
+            background: linear-gradient(90deg, #1abc9c 0%, #3498db 100%);
+            color: #fff;
+        }
+        .night-toggle:hover {
+            background: linear-gradient(270deg, #7b2ff2 0%, #f357a8 100%);
+            color: #fff;
+            box-shadow: 0 4px 18px 0 #7b2ff255;
+            transition: background 0.23s, color 0.18s, box-shadow 0.18s;
+        }
+        .night-toggle.active {
+            background: linear-gradient(90deg, #2c3e50 0%, #3498db 100%);
+            color: #fff;
+        }
+        .night-toggle.active:hover {
+            background: linear-gradient(90deg, #1abc9c 0%, #3498db 100%);
+            color: #fff;
+        }
+        .night-toggle.active .sun {
+            color: #ffeb3b;
+            filter: drop-shadow(0 0 2px #23243a);
+        }
+        button {
+            padding: 15px 38px;
+            background: linear-gradient(90deg, #3498db 0%, #1abc9c 100%);
+            color: #fff;
+            border: none;
+            border-radius: 28px;
+            font-size: 1.18rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 18px;
+            box-shadow: 0 6px 24px 0 rgba(52,152,219,0.13);
+            transition: background 0.23s, transform 0.18s, box-shadow 0.18s;
+            outline: none;
+            position: relative;
+            animation: fadeInUpBtn 0.85s cubic-bezier(.4,0,.2,1) 0.15s both;
+        }
+        button:hover, button:focus {
+            background: linear-gradient(90deg, #217dbb 0%, #16a085 100%);
+            transform: scale(1.07) translateY(-2px);
+            box-shadow: 0 8px 32px 0 rgba(52,152,219,0.18);
+        }
+        body.night-mode button {
+            background: linear-gradient(90deg, #3a3ad6 0%, #7b2ff2 100%);
+            color: #fff;
+        }
+        @keyframes fadeInUpBtn {
+            from { opacity: 0; transform: translateY(40px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(to right, #2c3e50, #3498db);
+            color: white;
+            text-align: center;
+            padding: 40px;
+        }
+        h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            opacity: 0;
+            transform: translateY(30px);
+            animation: fadeSlideInH1 1.1s cubic-bezier(.4,0,.2,1) 0.45s forwards;
+        }
+        @keyframes fadeSlideInH1 {
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .logo {
+            max-width: 100px;
+            margin: 0 auto;
+            display: block;
+            border-radius: 15px;
+            opacity: 0;
+            transform: translateY(-30px);
+            animation: fadeSlideInLogo 1.1s cubic-bezier(.4,0,.2,1) 0.2s forwards;
+        }
+        @keyframes fadeSlideInLogo {
+            to { opacity: 1; transform: translateY(0); }
+        }
+        form {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            width: 60%;
+            margin: 0 auto;
+        }
+        input[type="file"] {
+            width: 80%;
+            padding: 10px;
+            margin: 10px auto;
+            border: none;
+            border-radius: 5px;
+        }
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+            margin: 10px auto;
+            border: none;
+            border-radius: 5px;
+            background-color: white;
+        }
+        .or-divider {
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .or-divider::before, .or-divider::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background-color: rgba(255, 255, 255, 0.3);
+            margin: 0 10px;
+        }
+        button {
+            padding: 10px 25px;
+            background-color: #1abc9c;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #16a085;
+        }
+        .results {
+            margin-top: 40px;
+            text-align: left;
+            width: 80%;
+            margin: 40px auto;
+            background: rgba(255,255,255,0.15);
+            padding: 25px;
+            border-radius: 10px;
+            opacity: 0;
+            animation: fadeInResults 1.1s cubic-bezier(.4,0,.2,1) 0.2s forwards;
+        }
+        @keyframes fadeInResults {
+            to { opacity: 1; }
+        }
+        .results h2 {
+            color: #f1c40f;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            position: relative;
+        }
+        .results h2::after {
+            content: '';
+            display: block;
+            position: absolute;
+            left: 0; bottom: -6px;
+            width: 100%; height: 3px;
+            background: linear-gradient(90deg, #7b2ff2 0%, #f357a8 100%);
+            border-radius: 2px;
+            transform: scaleX(0);
+            transition: transform 0.35s cubic-bezier(.4,0,.2,1);
+        }
+        .results h2:hover::after {
+            transform: scaleX(1);
+        }
+        .results h2 .icon {
+            font-size: 1.3em;
+            margin-right: 0.25em;
+        }
+        .results-section {
+            margin-bottom: 30px;
+            border-bottom: 1px solid #eaeaea;
+            padding-bottom: 18px;
+        }
+        .results-section:last-child {
+            border-bottom: none;
+        }
+        .content-box {
+            background: rgba(255,255,255,0.85);
+            color: #222;
+            padding: 20px 28px;
+            border-radius: 12px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-bottom: 18px;
+            max-height: 350px;
+            overflow-y: auto;
+            font-size: 1.15rem;
+            font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+            box-shadow: 0 4px 18px 0 rgba(44,62,80,0.10), 0 1.5px 6px 0 rgba(44,62,80,0.09);
+            border: 1px solid #eaeaea;
+        }
+        .download-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: #3498db;
+            text-decoration: none;
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 5px;
+        }
+        .download-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        #loading {
+            display: none; /* Initially hidden */
+            text-align: center;
+            margin-top: 20px;
+        }
+        #loading .spinner {
+            margin: auto;
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-top: 5px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        .clear-button {
+            background: #e74c3c;
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px 0 rgba(231,76,60,0.14);
+            transition: background 0.22s, box-shadow 0.15s, color 0.15s;
+            outline: none;
+            aspect-ratio: 1/1;
+            padding: 0;
+        }
+        .clear-button:hover, .clear-button:focus {
+            background: #c0392b;
+            color: #fff;
+            box-shadow: 0 4px 18px 0 rgba(231,76,60,0.22);
+        }
+        body.night-mode .clear-button {
+            background: linear-gradient(135deg, #a445ff 0%, #ff005e 100%);
+            color: #fffbe4;
+            box-shadow: 0 2px 14px 0 #a445ff55;
+        }
+        body.night-mode .clear-button:hover, body.night-mode .clear-button:focus {
+            background: linear-gradient(135deg, #ff005e 0%, #310a56 100%);
+            color: #fff;
+            box-shadow: 0 4px 22px 0 #ff005e99;
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="bubble-container">
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+      <div class="bubble"></div>
+    </div>
+    <button class="night-toggle" id="night-toggle">🌙 Night Mode</button>
+    <!-- Logo Section -->
+    <img src="static/Quicknotes logo.png" alt="Quicknotes Logo" class="logo">
+    <h1>Quicknotes🎙 - Audio/Video Summarizer & Q&A</h1>
+    <form id="upload-form" enctype="multipart/form-data">
+        <div class="input-group">
+            <input type="file" name="file" id="file-input" accept="audio/,video/">
+            <button type="button" id="clear-file" class="clear-button" style="display:none;">×</button>
+        </div>
+
+        <div class="or-divider">OR</div>
+
+        <div class="input-group">
+            <input type="text" name="youtube_url" id="youtube-url" placeholder="Enter YouTube URL">
+            <button type="button" id="clear-url" class="clear-button" style="display:none;">×</button>
+        </div>
+
+        <button type="submit">Process</button>
+    </form>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Processing your content... Please wait!</p>
+    </div>
+
+    <div class="results" id="results" style="display:none;">
+        <div class="results-section">
+            <h2><span class="icon">📝</span>Transcript</h2>
+            <div class="content-box" id="transcript-content"></div>
+            <a id="transcript-download" class="download-link" download>Download Transcript</a>
+        </div>
+
+        <div class="results-section">
+            <h2><span class="icon">🔎</span>Summary</h2>
+            <div class="content-box" id="summary-content"></div>
+            <a id="summary-download" class="download-link" download>Download Summary</a>
+        </div>
+
+        <div class="results-section">
+            <h2><span class="icon">❓</span>Questions</h2>
+            <div class="content-box" id="qa-content"></div>
+            <a id="qa-download" class="download-link" download>Download Questions</a>
+        </div>
+    </div>
+
+    <script>
+        // Night mode toggle logic
+        const nightToggle = document.getElementById('night-toggle');
+        function setNightMode(on) {
+            document.body.classList.toggle('night-mode', on);
+            nightToggle.classList.toggle('active', on);
+            nightToggle.textContent = on ? '☀️ Day Mode' : '🌙 Night Mode';
+            localStorage.setItem('nightMode', on ? '1' : '0');
+        }
+        nightToggle.addEventListener('click', () => {
+            setNightMode(!document.body.classList.contains('night-mode'));
+        });
+        // On load, restore preference
+        if (localStorage.getItem('nightMode') === '1') {
+            setNightMode(true);
+        }
+
+        const form = document.getElementById('upload-form');
+        const fileInput = document.getElementById('file-input');
+        const youtubeInput = document.getElementById('youtube-url');
+        const clearFileBtn = document.getElementById('clear-file');
+        const clearUrlBtn = document.getElementById('clear-url');
+        const loadingDiv = document.getElementById('loading');
+        const resultsDiv = document.getElementById('results');
+
+        // Content display elements
+        const transcriptContent = document.getElementById('transcript-content');
+        const summaryContent = document.getElementById('summary-content');
+        const qaContent = document.getElementById('qa-content');
+
+        // Download links
+        const transcriptDownload = document.getElementById('transcript-download');
+        const summaryDownload = document.getElementById('summary-download');
+        const qaDownload = document.getElementById('qa-download');
+
+        // Show/hide clear buttons when inputs change
+        fileInput.addEventListener('change', function() {
+            clearFileBtn.style.display = this.value ? 'inline-flex' : 'none';
+            if (this.value) {
+                youtubeInput.value = '';
+                clearUrlBtn.style.display = 'none';
+            }
+        });
+
+        youtubeInput.addEventListener('input', function() {
+            clearUrlBtn.style.display = this.value ? 'inline-flex' : 'none';
+            if (this.value) {
+                fileInput.value = '';
+                clearFileBtn.style.display = 'none';
+            }
+        });
+
+        // Clear button functionality
+        clearFileBtn.addEventListener('click', function() {
+            fileInput.value = '';
+            this.style.display = 'none';
+        });
+
+        clearUrlBtn.addEventListener('click', function() {
+            youtubeInput.value = '';
+            this.style.display = 'none';
+        });
+
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            if (!fileInput.value && !youtubeInput.value) {
+                alert('Please either upload a file or enter a YouTube URL');
+                return;
+            }
+
+            const formData = new FormData(form);
+
+            // Show the loading indicator
+            loadingDiv.style.display = 'block';
+            resultsDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Populate content areas with the actual text
+                // Transcript: highlight first sentence and bold keywords
+                function highlightTranscript(text) {
+                    if (!text) return "No transcript available.";
+                    const firstSentence = text.split(/(?<=[.!?])\s+/)[0];
+                    const rest = text.slice(firstSentence.length);
+                    return `<span class='highlight-sentence'>${firstSentence}</span>${rest}`;
+                }
+                transcriptContent.innerHTML = highlightTranscript(data.transcript_content);
+
+                // Summary: show as bullet points if possible
+                function summaryToList(summary) {
+                    if (!summary) return "No summary available.";
+                    const points = summary.split(/\n|\. /).filter(s => s.trim().length > 0);
+                    if (points.length < 2) return summary;
+                    return `<ul class='summary-points'>${points.map(p => `<li>${p.replace(/^[-*\d.]+\s*/, '')}</li>`).join('')}</ul>`;
+                }
+                summaryContent.innerHTML = summaryToList(data.summary_content);
+
+                // Questions: styled list
+                const qaItems = Array.isArray(data.qa_content) ? data.qa_content : [];
+                qaContent.innerHTML = qaItems.length > 0
+                    ? `<ul class='qa-list'>${qaItems.map(q => `<li>${q}</li>`).join('')}</ul>`
+                    : "No questions generated.";
+
+                // Set download links
+                transcriptDownload.href = data.transcript_file;
+                summaryDownload.href = data.summary_file;
+                qaDownload.href = data.qa_file;
+
+                // Display results
+                resultsDiv.style.display = 'block';
+
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                console.error(error);
+            } finally {
+                // Hide the loading indicator
+                loadingDiv.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

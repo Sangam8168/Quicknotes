@@ -1,0 +1,6 @@
+flask
+whisper
+transformers
+nltk
+youtube-transcript-api
+PyPDF2
