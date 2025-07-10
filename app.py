@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file
-import whisper
+import requests
 from transformers import pipeline
 import os
 import uuid
@@ -10,8 +10,6 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from urllib.parse import urlparse, parse_qs
 import PyPDF2  # Added for PDF support
 
-# Suppress Whisper warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="whisper")
 
 # Ensure NLTK resources are downloaded
 nltk.download('punkt')
@@ -24,7 +22,6 @@ os.environ[
 
 # Load models
 print("Loading models...")
-transcribe_model = whisper.load_model("base")  # Better Whisper model for transcription
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn",
                       tokenizer="facebook/bart-large-cnn")  # Advanced summarizer
 qa_generator = pipeline("text2text-generation", model="google/flan-t5-base")  # Enhanced question generation
@@ -100,17 +97,51 @@ def extract_text_from_pdf(filepath):
 
 
 def transcribe_audio(filepath):
-    print("Transcribing...")
-    if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-        print("Invalid or empty audio file.")
+    """
+    Transcribe an audio/video file using AssemblyAI API.
+    """
+    print("Transcribing using AssemblyAI...")
+    api_key = os.environ.get("ASSEMBLYAI_API_KEY")
+    if not api_key:
+        print("AssemblyAI API key not set.")
         return None
-    try:
-        result = transcribe_model.transcribe(filepath)
-        print("Transcription Result:", result["text"])
-        return result["text"]
-    except Exception as e:
-        print("Error during transcription:", e)
+    headers = {"authorization": api_key}
+    # 1. Upload file to AssemblyAI
+    with open(filepath, "rb") as f:
+        response = requests.post(
+            "https://api.assemblyai.com/v2/upload",
+            headers=headers,
+            data=f
+        )
+    if response.status_code != 200:
+        print("Upload failed:", response.text)
         return None
+    upload_url = response.json()["upload_url"]
+    # 2. Request transcription
+    transcript_response = requests.post(
+        "https://api.assemblyai.com/v2/transcript",
+        headers=headers,
+        json={"audio_url": upload_url}
+    )
+    if transcript_response.status_code != 200:
+        print("Transcription request failed:", transcript_response.text)
+        return None
+    transcript_id = transcript_response.json()["id"]
+    # 3. Poll for completion
+    polling_url = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
+    import time
+    for _ in range(60):  # Wait up to ~3 minutes
+        poll_res = requests.get(polling_url, headers=headers)
+        status = poll_res.json()["status"]
+        if status == "completed":
+            return poll_res.json()["text"]
+        elif status == "failed":
+            print("Transcription failed:", poll_res.text)
+            return None
+        time.sleep(3)
+    print("Transcription timed out.")
+    return None
+
 
 
 def preprocess_text(text):
