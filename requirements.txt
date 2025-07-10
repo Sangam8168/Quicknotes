@@ -1,5 +1,5 @@
 flask
-whisper
+openai-whisper
 transformers
 nltk
 youtube-transcript-api
