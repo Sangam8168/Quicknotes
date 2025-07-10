@@ -4,3 +4,4 @@ transformers
 nltk
 youtube-transcript-api
 PyPDF2
+gunicorn
