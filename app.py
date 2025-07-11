@@ -16,9 +16,11 @@ nltk.download('punkt')
 app = Flask(__name__, static_folder='static')
 
 # Add FFmpeg executable path
-os.environ[
-    "PATH"] = r"C:\Users\Ritika\Downloads\QuickNotes\QuickNotes\ffmpeg-7.1.1-essentials_build\ffmpeg-7.1.1-essentials_build\bin;" + \
-              os.environ["PATH"]
+import sys
+if os.name == "nt":
+    # Set FFmpeg path for Windows (local development)
+    os.environ["PATH"] = r"C:\\Users\\Ritika\\Downloads\\QuickNotes\\QuickNotes\\ffmpeg-7.1.1-essentials_build\\bin;" + os.environ["PATH"]
+# On Linux/cloud, FFmpeg should be installed via package manager or Dockerfile
 
 # Load models
 print("Loading models...")
