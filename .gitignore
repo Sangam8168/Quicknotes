@@ -23,3 +23,42 @@ htmlcov/
 .windsurf/
 netlify.toml
 windsurf_deployment.yaml
+# Ignore FFmpeg binaries and related build folders
+ffmpeg-*/
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+
+# Ignore FFmpeg documentation and manuals
+ffmpeg*.html
+ffplay*.html
+ffprobe*.html
+ffmpeg-utils.html
+ffmpeg-filters.html
+ffmpeg-protocols.html
+ffmpeg-codecs.html
+ffmpeg-devices.html
+ffmpeg-formats.html
+ffmpeg-resampler.html
+ffmpeg-scaler.html
+ffmpeg-bitstream-filters.html
+
+# Ignore libav* documentation
+libavcodec.html
+libavdevice.html
+libavfilter.html
+libavformat.html
+libavutil.html
+libswresample.html
+libswscale.html
+
+# Ignore FATE-related files (FFmpeg test suite)
+fate.html
+tests/fate/
+doc/fate/
+
+# Ignore other FFmpeg formats and presets
+*.ffpreset
+nut.html
+mailing-list-faq.html
+
