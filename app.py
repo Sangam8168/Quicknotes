@@ -1,32 +1,53 @@
+# Updated app.py — use local models (faster-whisper + transformers) and ready for Docker/Gunicorn
 from flask import Flask, render_template, request, jsonify, send_file
-import requests
 from transformers import pipeline
 import os
 import uuid
 from nltk.tokenize import sent_tokenize
 import nltk
-import warnings
+import logging
 from youtube_transcript_api import YouTubeTranscriptApi
 from urllib.parse import urlparse, parse_qs
-import PyPDF2  # Added for PDF support
+import PyPDF2
+from faster_whisper import WhisperModel
+import time
+import traceback
 
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Ensure NLTK resources are downloaded
-nltk.download('punkt')
+# Ensure NLTK punkt tokenizer is available (download only if missing)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 app = Flask(__name__, static_folder='static')
 
-# Add FFmpeg executable path
-#os.environ[
-#    "PATH"] = r"C:\Users\Ritika\Downloads\QuickNotes\QuickNotes\ffmpeg-7.1.1-essentials_build\ffmpeg-7.1.1-essentials_build\bin;" + \
-#              os.environ["PATH"]
+# Lazy-loaded models (so startup is fast)
+_summarizer = None
+_qa_generator = None
+_whisper_model = None
 
-# Load models
-print("Loading models...")
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn",
-                      tokenizer="facebook/bart-large-cnn")  # Advanced summarizer
-qa_generator = pipeline("text2text-generation", model="google/flan-t5-base")  # Enhanced question generation
-print("Models loaded.")
+def load_transformer_models(summarizer_model_name="facebook/bart-large-cnn", qa_model_name="google/flan-t5-base"):
+    global _summarizer, _qa_generator
+    if _summarizer is None:
+        logger.info("Loading summarizer model...")
+        _summarizer = pipeline("summarization", model=summarizer_model_name, tokenizer=summarizer_model_name)
+        logger.info("Summarizer loaded.")
+    if _qa_generator is None:
+        logger.info("Loading question-generation model...")
+        _qa_generator = pipeline("text2text-generation", model=qa_model_name)
+        logger.info("QA generator loaded.")
 
+def load_whisper_model(model_size="small", device="cpu", compute_type="int8"):
+    global _whisper_model
+    if _whisper_model is None:
+        logger.info(f"Loading Whisper model (size={model_size}, device={device}, compute_type={compute_type})...")
+        _whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        logger.info("Whisper model loaded.")
+    return _whisper_model
 
 def extract_video_id(url):
     """Extract YouTube video ID from various URL formats."""
@@ -39,48 +60,22 @@ def extract_video_id(url):
             return query_params.get('v', [None])[0]
         return None
     except Exception as e:
-        print(f"Error extracting video ID: {e}")
+        logger.error(f"Error extracting video ID: {e}")
         return None
 
-
 def get_youtube_transcript(url):
-    """Get transcript from YouTube video using youtube_transcript_api."""
+    """Get transcript from YouTube video using youtube_transcript_api (no API key required)."""
     try:
         video_id = extract_video_id(url)
         if not video_id:
             raise ValueError("Could not extract video ID from URL")
-
-        print(f"Getting transcript for video ID: {video_id}")
+        logger.info(f"Getting transcript for video ID: {video_id}")
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-
-        # Combine all text parts into a single transcript
         full_transcript = " ".join([item['text'] for item in transcript_list])
         return full_transcript
     except Exception as e:
-        print(f"YouTube transcript error: {e}")
+        logger.error(f"YouTube transcript error: {e}")
         return None
-
-
-def download_youtube_audio(url):
-    """Download audio from YouTube videos - kept for audio processing if needed."""
-    try:
-        video_id = extract_video_id(url)
-        if not video_id:
-            raise ValueError("Unable to extract YouTube video ID.")
-
-        # Generate a unique filename
-        filename = f"{uuid.uuid4()}.mp4"
-        output_path = "temp"
-
-        # Create the directory if it doesn't exist
-        os.makedirs(output_path, exist_ok=True)
-
-        # For now, just return the ID as we'll be using transcript API instead
-        return video_id
-    except Exception as e:
-        print(f"YouTube download error: {e}")
-        return None
-
 
 def extract_text_from_pdf(filepath):
     """Extracts all text from a PDF file."""
@@ -92,103 +87,73 @@ def extract_text_from_pdf(filepath):
                 text += page.extract_text() or ""
         return text.strip()
     except Exception as e:
-        print(f"PDF extraction error: {e}")
+        logger.error(f"PDF extraction error: {e}")
         return None
 
-
-def transcribe_audio(filepath):
+def transcribe_audio(filepath, model_size="small", device="cpu", compute_type="int8"):
     """
-    Transcribe an audio/video file using AssemblyAI API.
+    Transcribe an audio/video file using a local Whisper model (faster-whisper).
+    This avoids any paid external transcription API.
+    Requirements: faster-whisper and ffmpeg available on the system.
     """
-    print("Transcribing using AssemblyAI...")
-    api_key = os.environ.get("ASSEMBLYAI_API_KEY")
-    if not api_key:
-        print("AssemblyAI API key not set.")
+    try:
+        model = load_whisper_model(model_size=model_size, device=device, compute_type=compute_type)
+        segments, info = model.transcribe(filepath, beam_size=5)
+        text = " ".join([segment.text.strip() for segment in segments if segment.text.strip()])
+        logger.info(f"Transcription completed (duration={getattr(info,'duration', 'unknown')}s)")
+        return text
+    except Exception as e:
+        logger.error(f"Local transcription error: {e}")
+        traceback.print_exc()
         return None
-    headers = {"authorization": api_key}
-    # 1. Upload file to AssemblyAI
-    with open(filepath, "rb") as f:
-        response = requests.post(
-            "https://api.assemblyai.com/v2/upload",
-            headers=headers,
-            data=f
-        )
-    if response.status_code != 200:
-        print("Upload failed:", response.text)
-        return None
-    upload_url = response.json()["upload_url"]
-    # 2. Request transcription
-    transcript_response = requests.post(
-        "https://api.assemblyai.com/v2/transcript",
-        headers=headers,
-        json={"audio_url": upload_url}
-    )
-    if transcript_response.status_code != 200:
-        print("Transcription request failed:", transcript_response.text)
-        return None
-    transcript_id = transcript_response.json()["id"]
-    # 3. Poll for completion
-    polling_url = f"https://api.assemblyai.com/v2/transcript/{transcript_id}"
-    import time
-    for _ in range(60):  # Wait up to ~3 minutes
-        poll_res = requests.get(polling_url, headers=headers)
-        status = poll_res.json()["status"]
-        if status == "completed":
-            return poll_res.json()["text"]
-        elif status == "failed":
-            print("Transcription failed:", poll_res.text)
-            return None
-        time.sleep(3)
-    print("Transcription timed out.")
-    return None
-
-
 
 def preprocess_text(text):
-    print("Preprocessing transcript...")
+    logger.debug("Preprocessing transcript...")
     try:
         sentences = sent_tokenize(text)
         cleaned_sentences = [sentence.strip() for sentence in sentences if len(sentence.split()) > 3]
         preprocessed_text = " ".join(cleaned_sentences)
-        print("Preprocessed Text:", preprocessed_text)
+        logger.debug("Preprocessed text length: %d", len(preprocessed_text))
         return preprocessed_text
     except Exception as e:
-        print("Error during preprocessing:", e)
+        logger.error("Error during preprocessing: %s", e)
         return text
 
-
 def summarize_text(text):
-    print("Summarizing...")
+    logger.info("Summarizing...")
     try:
+        # Lazy-load transformer models
+        load_transformer_models()
         preprocessed_text = preprocess_text(text)
-        chunks = [preprocessed_text[i:i + 1000] for i in range(0, len(preprocessed_text), 1000)]
+        # Simple character-based chunking (conservative)
+        max_chars = 1000
+        chunks = [preprocessed_text[i:i + max_chars] for i in range(0, len(preprocessed_text), max_chars)]
         summaries = []
         for chunk in chunks:
             input_length = len(chunk.split())  # Count words
-            max_len = max(50, int(input_length * 0.8))  # Adjust max_length to 80% of input length
-            summary = summarizer(chunk, max_length=max_len, min_length=30, do_sample=False)[0]['summary_text']
+            max_len = max(50, int(input_length * 0.8))
+            summary_result = _summarizer(chunk, max_length=max_len, min_length=30, do_sample=False)
+            summary = summary_result[0]['summary_text']
             summaries.append(summary)
         summarized_text = " ".join(summaries)
         return summarized_text
     except Exception as e:
-        print("Error during summarization:", e)
+        logger.error("Error during summarization: %s", e)
+        traceback.print_exc()
         return "Error during summarization."
 
-
-import traceback
-
 def generate_questions_from_summary(summary):
-    print("Generating questions from summary...")
-    print("Summary input:", summary)
+    logger.info("Generating questions from summary...")
+    logger.debug("Summary input length: %d", len(summary) if summary else 0)
     try:
+        load_transformer_models()
         sentences = sent_tokenize(summary)
-        print("Tokenized sentences:", sentences)
         if not sentences:
-            print("No sentences found in summary.")
+            logger.warning("No sentences found in summary.")
             return ["No questions generated: summary was empty."]
         questions = []
         for sentence in sentences[:5]:
-            qa = qa_generator(
+            qa = _qa_generator(
                 f"Generate a question based on: {sentence}",
                 max_length=64,
                 num_return_sequences=1,
@@ -197,10 +162,9 @@ def generate_questions_from_summary(summary):
             questions.append(qa)
         return questions
     except Exception as e:
-        print("Error generating questions:", e)
+        logger.error("Error generating questions: %s", e)
         traceback.print_exc()
         return [f"Error generating questions: {str(e)}"]
-
 
 def save_to_file(content, filename):
     """Save the given content to a text file."""
@@ -210,11 +174,9 @@ def save_to_file(content, filename):
         file.write(content)
     return filepath
 
-
 @app.route('/')
 def index():
     return render_template('index.html')
-
 
 @app.route('/remove-file', methods=['POST'])
 def remove_file():
@@ -222,22 +184,19 @@ def remove_file():
         form_data = request.get_json()
         if not form_data or 'filename' not in form_data:
             return jsonify({"error": "No filename provided"}), 400
-
         filename = form_data['filename']
         filepath = os.path.join("temp", filename)
-
         if os.path.exists(filepath):
             os.remove(filepath)
             return jsonify({"success": True})
         else:
             return jsonify({"error": "File not found"}), 404
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        logger.error("Error in remove_file: %s", e)
+        return jsonify({"error": "Internal error"}), 500
 
 @app.route('/process', methods=['POST'])
 def process():
-    import time
     try:
         start_time = time.time()
         file = request.files.get('file')
@@ -254,7 +213,6 @@ def process():
             filepath = os.path.join("temp", filename)
             os.makedirs("temp", exist_ok=True)
             file.save(filepath)
-            # Check if PDF
             if filename.lower().endswith('.pdf'):
                 t0 = time.time()
                 transcript = extract_text_from_pdf(filepath)
@@ -262,6 +220,7 @@ def process():
                 if not transcript:
                     return jsonify({"error": "Failed to extract text from PDF"}), 400
             else:
+                # Transcribe locally using faster-whisper (no API key required)
                 t0 = time.time()
                 transcript = transcribe_audio(filepath)
                 step_times['audio_transcribe'] = time.time() - t0
@@ -293,11 +252,11 @@ def process():
         questions_file = save_to_file("\n".join(questions), "questions.txt")
 
         total_time = time.time() - start_time
-        print("--- Processing Timings (seconds) ---")
+        logger.info("--- Processing Timings (seconds) ---")
         for k, v in step_times.items():
-            print(f"{k}: {v:.2f}s")
-        print(f"Total: {total_time:.2f}s")
-        print("-----------------------------------")
+            logger.info("%s: %.2fs", k, v)
+        logger.info("Total: %.2fs", total_time)
+        logger.info("-----------------------------------")
 
         # Return file paths and the actual content
         return jsonify({
@@ -310,9 +269,9 @@ def process():
         })
 
     except Exception as e:
-        print("Error:", e)
-        return jsonify({"error": str(e)}), 500
-
+        logger.error("Error in processing: %s", e)
+        traceback.print_exc()
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
@@ -321,6 +280,6 @@ def download_file(filename):
         return send_file(filepath, as_attachment=True)
     return jsonify({"error": "File not found"}), 404
 
-
 if __name__ == '__main__':
-    app.run(debug=True, threaded=False)  # Single-threaded mode for stability
+    # For local testing only. Render/Gunicorn will run the app in production.
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)), debug=False)
