@@ -16,10 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip
 RUN pip install --upgrade pip
 
-# Install CPU-only torch wheel compatible with Python 3.10
-# If you want a different torch version, pick the matching wheel for your Python version.
-RUN pip install "torch==2.2.0+cpu" --index-url https://download.pytorch.org/whl/cpu
-
 # Copy requirements and install remaining dependencies (requirements.txt should NOT include torch)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
