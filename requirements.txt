@@ -1,8 +1,12 @@
 flask
-requests
-torch
 transformers
+faster-whisper
+sentencepiece
 nltk
 youtube-transcript-api
 PyPDF2
 gunicorn
+requests
+tqdm
+tokenizers
+protobuf
