@@ -283,3 +283,26 @@ def download_file(filename):
 if __name__ == '__main__':
     # For local testing only. Render/Gunicorn will run the app in production.
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)), debug=False)
+# --- diagnostic block to add near the top of app.py (after imports) ---
+import logging
+logger = logging.getLogger(__name__)
+
+# Check PyTorch availability
+try:
+    import torch
+    logger.info("PyTorch available: %s", torch.__version__)
+except Exception as e:
+    logger.exception("PyTorch import failed: %s", e)
+
+# Check youtube-transcript-api surface
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+    logger.info("youtube_transcript_api imported. members: %s", [m for m in dir(YouTubeTranscriptApi) if not m.startswith('_')])
+    # quick check for the expected method
+    if not hasattr(YouTubeTranscriptApi, 'get_transcript'):
+        logger.warning("YouTubeTranscriptApi.get_transcript attribute NOT found. Available members: %s", dir(YouTubeTranscriptApi))
+    else:
+        logger.info("YouTubeTranscriptApi.get_transcript is available.")
+except Exception as e:
+    logger.exception("youtube_transcript_api import failed: %s", e)
+# --- end diagnostic block ---
